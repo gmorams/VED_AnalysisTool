@@ -1,0 +1,6 @@
+streamlit
+pandas
+numpy
+plotly
+openpyxl # Para leer/escribir archivos .xlsx
+xlsxwriter # Usado en la función de descarga
