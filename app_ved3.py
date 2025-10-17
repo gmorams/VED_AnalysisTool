@@ -76,6 +76,14 @@ ORDEN_CENTROS = [
     "CE El Segre"
 ]
 
+def formatear_numeros_df(df):
+    """Elimina formato de comas en números del DataFrame"""
+    df_formatted = df.copy()
+    for col in df_formatted.columns:
+        if df_formatted[col].dtype in ['int64', 'float64']:
+            df_formatted[col] = df_formatted[col].astype(int)
+    return df_formatted
+
 # ===================== FUNCIONES DE PROCESAMIENTO =====================
 
 def read_excel_or_csv(file):
@@ -158,6 +166,12 @@ def procesar_trucades_video(files, tipo="Trucades"):
             
             # Filtrar por duración si existe
             if col_duracio:
+                # Primero eliminar filas con "-" en duración
+                df = df[df[col_duracio] != '-']
+                df = df[df[col_duracio] != ' - ']  # Por si tiene espacios
+                df = df[~df[col_duracio].astype(str).str.strip().eq('-')]  # Más robusto
+                
+                # Luego aplicar el filtro de 5 segundos
                 df['minutos_totales'] = df[col_duracio].apply(parsear_duracion)
                 df = df[df['minutos_totales'] > (5/60)]
             
@@ -321,6 +335,44 @@ def procesar_reserves(files):
     
     return df_base
 
+def procesar_video_combinado(file):
+    """Procesa archivo combinado con hojas VIDEOTRUCADES y VIDEOVISITES"""
+    if not file:
+        return None, None
+    
+    try:
+        excel_file = pd.ExcelFile(file)
+        
+        df_videotrucades = None
+        df_videovisites = None
+        
+        # Procesar hoja VIDEOTRUCADES
+        if 'VIDEOTRUCADES' in excel_file.sheet_names:
+            df_temp = pd.read_excel(file, sheet_name='VIDEOTRUCADES')
+            # Convertir a lista de un solo archivo para reutilizar función existente
+            temp_file = BytesIO()
+            df_temp.to_excel(temp_file, index=False)
+            temp_file.seek(0)
+            temp_file.name = "videotrucades_temp.xlsx"
+            
+            df_videotrucades = procesar_trucades_video([temp_file], "Videotrucades")
+        
+        # Procesar hoja VIDEOVISITES
+        if 'VIDEOVISITES' in excel_file.sheet_names:
+            df_temp = pd.read_excel(file, sheet_name='VIDEOVISITES')
+            temp_file = BytesIO()
+            df_temp.to_excel(temp_file, index=False)
+            temp_file.seek(0)
+            temp_file.name = "videovisites_temp.xlsx"
+            
+            df_videovisites = procesar_trucades_video([temp_file], "Videovisites")
+        
+        return df_videotrucades, df_videovisites
+        
+    except Exception as e:
+        st.error(f"Error procesando archivo combinado: {e}")
+        return None, None
+
 def combinar_resultados(dfs_dict):
     """Combina todos los DataFrames de resultados en una tabla final"""
     
@@ -431,22 +483,13 @@ def main():
             key="trucades"
         )
         
-        st.markdown("#### 🎥 Videotrucades")
-        st.caption("Formats acceptats: .xlsx, .csv")
-        videotrucades_files = st.file_uploader(
-            "Selecciona arxius de Videotrucades",
-            type=['xlsx', 'xls', 'csv'],
-            accept_multiple_files=True,
-            key="videotrucades"
-        )
-        
-        st.markdown("#### 👥 Videovisites")
-        st.caption("Formats acceptats: .xlsx, .csv")
-        videovisites_files = st.file_uploader(
-            "Selecciona arxius de Videovisites",
-            type=['xlsx', 'xls', 'csv'],
-            accept_multiple_files=True,
-            key="videovisites"
+        st.markdown("#### 🎥 Videotrucades i Videovisites")
+        st.caption("Format acceptat: .xlsx amb 2 fulles (VIDEOTRUCADES i VIDEOVISITES)")
+        video_combined_file = st.file_uploader(
+            "Selecciona l'arxiu combinat de Video",
+            type=['xlsx', 'xls'],
+            accept_multiple_files=False,
+            key="video_combined"
         )
     
     with col2:
@@ -474,7 +517,7 @@ def main():
     if st.button("🚀 Processar Dades", type="primary", use_container_width=True):
         
         # Verificar que hay al menos un archivo
-        if not any([trucades_files, videotrucades_files, videovisites_files, consultes_file, reserves_files]):
+        if not any([trucades_files, video_combined_file, consultes_file, reserves_files]):
             st.error("⚠️ Si us plau, carrega almenys un arxiu per processar.")
             # Borrar estado si estaba en True
             st.session_state['processing_complete'] = False 
@@ -500,20 +543,16 @@ def main():
             progress_bar.progress(progress / total_steps)
         
         # Procesar Videotrucades
-        if videotrucades_files:
-            status_text.text("Processant Videotrucades...")
-            df_videotrucades = procesar_trucades_video(videotrucades_files, "Videotrucades")
+        # Procesar Videotrucades y Videovisites desde archivo combinado
+        if video_combined_file:
+            status_text.text("Processant Videotrucades i Videovisites...")
+            df_videotrucades, df_videovisites = procesar_video_combinado(video_combined_file)
+            
             if df_videotrucades is not None:
                 resultados['Videotrucades'] = df_videotrucades
-            progress += 1
-            progress_bar.progress(progress / total_steps)
-        
-        # Procesar Videovisites
-        if videovisites_files:
-            status_text.text("Processant Videovisites...")
-            df_videovisites = procesar_trucades_video(videovisites_files, "Videovisites")
             if df_videovisites is not None:
                 resultados['Videovisites'] = df_videovisites
+            
             progress += 1
             progress_bar.progress(progress / total_steps)
         
@@ -615,12 +654,14 @@ def main():
                             totales[col] = 0
                     df_mostrar = pd.concat([df_mostrar, pd.DataFrame([totales])], ignore_index=True)
                 
-                st.dataframe(df_mostrar, use_container_width=True, height=600)
+                df_mostrar_formatted = formatear_numeros_df(df_mostrar)
+                st.dataframe(df_mostrar_formatted, use_container_width=True, height=600)
                 
                 # Botón de descarga para la tabla seleccionada
                 output = BytesIO()
+                output = BytesIO()
                 with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                    df_mostrar.to_excel(writer, sheet_name=tabla_seleccionada, index=False)
+                    df_mostrar_formatted.to_excel(writer, sheet_name=tabla_seleccionada, index=False)
                     
                     workbook = writer.book
                     worksheet = writer.sheets[tabla_seleccionada]
