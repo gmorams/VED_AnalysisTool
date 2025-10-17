@@ -453,9 +453,9 @@ def main():
     ### 📊 Càlcul de Volumetries per Mes
     
     Aquesta eina permet tractar les dades de **Trucades**, **Videotrucades**, **Videovisites**, 
-    **Consultes Autoservei** i **Reserves** corresponents al servei de VED (Videotrucades i Entorn Digital).
+    **Consultes Autoservei** i **Reserves** corresponents al servei de VED.
     
-    L'eina processa automàticament els arxius proporcionats i genera un informe consolidat amb les 
+    L'eina processa automàticament els arxius proporcionats, un cop pujats, i clicant en -Processar Dades- genera un informe consolidat amb les 
     estadístiques per cada centre penitenciari i educatiu.
     """)
     
