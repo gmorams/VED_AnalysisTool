@@ -65,7 +65,6 @@ ORDEN_CENTROS = [
     "CP Obert Lleida",
     "CP Obert BCN",
     "CP Obert Tarragona",
-    "CP Terrassa",
     "CE Can Llupià",
     "CE L'Alzina",
     "CE Montilivi",
@@ -75,6 +74,178 @@ ORDEN_CENTROS = [
     "CE Folch i Torres",
     "CE El Segre"
 ]
+
+def extraer_tabla_acumulada_anterior(file):
+    """Extrae la tabla acumulada del mes más reciente del archivo Excel"""
+    if not file:
+        return None
+    
+    try:
+        df = pd.read_excel(file, header=None)
+        
+        # Buscar todas las fechas en formato dd/mm/yyyy
+        fechas_encontradas = []
+        for idx, row in df.iterrows():
+            for col_idx, cell in enumerate(row):
+                if pd.notna(cell):
+                    cell_str = str(cell)
+                    # Buscar patrón de fecha
+                    match = re.search(r'(\d{2}/\d{2}/\d{4})', cell_str)
+                    if match:
+                        fechas_encontradas.append({
+                            'fecha': match.group(1),
+                            'fila': idx,
+                            'col': col_idx
+                        })
+        
+        if not fechas_encontradas:
+            st.error("No se encontraron fechas en el archivo")
+            return None
+        
+        # Ordenar por fila para obtener la última tabla
+        fechas_encontradas.sort(key=lambda x: x['fila'], reverse=True)
+        ultima_fecha_info = fechas_encontradas[0]
+        
+        # La tabla empieza 2 filas después de la fecha
+        inicio_tabla = ultima_fecha_info['fila'] + 2
+        
+        # Leer la tabla desde esa posición
+        df_tabla = pd.read_excel(file, header=inicio_tabla, nrows=21)  # 20 centros + 1 TOTAL
+        
+        # Verificar que tiene las columnas esperadas
+        if df_tabla.shape[1] < 20:
+            st.error("La tabla no tiene el formato esperado (faltan columnas)")
+            return None
+        
+        # Renombrar columnas para que coincidan con el formato esperado
+        # La estructura es: Interns, Inici VeD, [5 cols Trucades], [5 cols Videotrucades], 
+        # [5 cols Videovisites], [2 cols Consultes], [1 col Reserves], [2 cols Alta Digital]
+        
+        columnas_nuevas = [
+            'Interns', 'Inici VeD', 
+            'N_Trucades', '%Incre_Trucades', 'Minuts_Trucades', '%Incre_Minuts_T', 'Interns_Trucades',
+            'N_Videotrucades', '%Incre_Video', 'Minuts_Videotrucades', '%Incre_Minuts_V', 'Interns_Videotrucades',
+            'N_Videovisites', '%Incre_Visites', 'Minuts_Videovisites', '%Incre_Minuts_Vi', 'Interns_Videovisites',
+            'N_Consultes', 'Interns_Consultes',
+            'N_Reserves', 'Interns_Reserves',
+            'Alta_Digital', 'N_Alta'
+        ]
+        
+        # Ajustar si hay menos columnas
+        if df_tabla.shape[1] < len(columnas_nuevas):
+            columnas_nuevas = columnas_nuevas[:df_tabla.shape[1]]
+        
+        df_tabla.columns = columnas_nuevas[:df_tabla.shape[1]]
+        
+        # Añadir columna Centro si no existe
+        if 'Centro' not in df_tabla.columns:
+            # Buscar la columna con nombres de centros (probablemente la primera con texto)
+            for col in df_tabla.columns:
+                if df_tabla[col].dtype == 'object':
+                    df_tabla['Centro'] = df_tabla[col]
+                    break
+        
+        st.success(f"✅ Tabla acumulada anterior cargada: {ultima_fecha_info['fecha']}")
+        return df_tabla
+        
+    except Exception as e:
+        st.error(f"Error procesando tabla acumulada: {e}")
+        return None
+
+def calcular_tabla_acumulada(df_actual, df_anterior):
+    """Calcula la tabla acumulada sumando datos actuales + anteriores y calculando incrementos"""
+    if df_anterior is None:
+        return df_actual
+    
+    print("df_actual: ",df_actual)
+    print("df_anterior: ",df_anterior)
+
+    df_acumulada = df_actual.copy()
+
+    # Copiar columnas no acumulables (Interns, Inici VeD, Alta_Digital) desde df_anterior
+    columnas_copiar = ['Interns', 'Inici VeD', 'Alta_Digital']
+    
+    for idx, row in df_acumulada.iterrows():
+        centro = row['Centro']
+        
+        if centro in df_anterior['Centro'].values:
+            fila_anterior = df_anterior[df_anterior['Centro'] == centro].iloc[0]
+            
+            for col in columnas_copiar:
+                if col in df_anterior.columns and col in df_acumulada.columns:
+                    df_acumulada.at[idx, col] = fila_anterior[col]
+    
+    # Columnas numéricas a sumar
+    columnas_sumar = [col for col in df_actual.columns 
+                      if col.startswith('N_') or col.startswith('Minuts_') or col.startswith('Interns_')]
+    columnas_sumar = [col for col in columnas_sumar if col != 'N_Alta']  # Excluir N_Alta
+    
+    # Para cada centro
+    for idx, row in df_acumulada.iterrows():
+        centro = row['Centro']
+        
+        # Buscar el centro en la tabla anterior
+        if centro in df_anterior['Centro'].values:
+            fila_anterior = df_anterior[df_anterior['Centro'] == centro].iloc[0]
+            
+            # Sumar valores
+            for col in columnas_sumar:
+                if col in df_anterior.columns and col in df_acumulada.columns:
+                    valor_anterior = fila_anterior[col] if pd.notna(fila_anterior[col]) else 0
+                    valor_actual = row[col] if pd.notna(row[col]) else 0
+                    
+                    # Convertir a numérico si es necesario
+                    if isinstance(valor_anterior, str):
+                        valor_anterior = 0
+                    if isinstance(valor_actual, str):
+                        valor_actual = 0
+                    
+                    df_acumulada.at[idx, col] = valor_anterior + valor_actual
+    
+    # Calcular incrementos porcentuales
+    # El incremento debe ser: (valor_actual_mes / valor_anterior_acumulado) * 100
+    for idx, row in df_acumulada.iterrows():
+        if row['Centro'] == 'TOTAL':
+            continue
+            
+        centro = row['Centro']
+        if centro not in df_anterior['Centro'].values:
+            continue
+        
+        fila_anterior = df_anterior[df_anterior['Centro'] == centro].iloc[0]
+        
+        # Calcular incrementos para cada servicio
+        servicios = [
+            ('Trucades', 'N_Trucades', '%Incre_Trucades'),
+            ('Trucades', 'Minuts_Trucades', '%Incre_Minuts_T'),
+            ('Videotrucades', 'N_Videotrucades', '%Incre_Video'),
+            ('Videotrucades', 'Minuts_Videotrucades', '%Incre_Minuts_V'),
+            ('Videovisites', 'N_Videovisites', '%Incre_Visites'),
+            ('Videovisites', 'Minuts_Videovisites', '%Incre_Minuts_Vi')
+        ]
+        
+        for servicio, col_valor, col_incre in servicios:
+            if col_valor in df_acumulada.columns and col_valor in df_anterior.columns:
+                # Valor anterior acumulado
+                valor_anterior_acum = fila_anterior[col_valor] if pd.notna(fila_anterior[col_valor]) else 0
+                if isinstance(valor_anterior_acum, str):
+                    valor_anterior_acum = 0
+                
+                # Valor actual acumulado (ya sumado anteriormente)
+                valor_actual_acum = row[col_valor] if pd.notna(row[col_valor]) else 0
+                if isinstance(valor_actual_acum, str):
+                    valor_actual_acum = 0
+                
+                # Calcular incremento: ((actual_acum - anterior_acum) / actual_acum) * 100
+                if valor_actual_acum > 0:
+                    incremento = ((valor_actual_acum - valor_anterior_acum) / valor_actual_acum) * 100
+                    df_acumulada.at[idx, col_incre] = f"{incremento:.1f}%"
+                elif valor_anterior_acum > 0:
+                    df_acumulada.at[idx, col_incre] = "-100.0%"
+                else:
+                    df_acumulada.at[idx, col_incre] = "0.0%"
+
+    return df_acumulada
 
 def formatear_numeros_df(df):
     """Elimina formato de comas en números del DataFrame"""
@@ -212,8 +383,8 @@ def procesar_trucades_video(files, tipo="Trucades"):
     
     # Actualizar valores donde existan
     for idx, centro in enumerate(df_base['Centro']):
-        # Ajustar para CP Lledoners (Pilot M1)
-        centro_buscar = "CP Lledoners" if centro == "CP Lledoners (Pilot M1)" else centro
+        # Ajustar para CP Lledoners (Pilot M1) -> YA NO SE HACE
+        centro_buscar = centro
         
         if centro_buscar in df_resultados['Centro'].values:
             fila = df_resultados[df_resultados['Centro'] == centro_buscar].iloc[0]
@@ -264,7 +435,7 @@ def procesar_consultes(file):
         })
         
         for idx, centro in enumerate(df_base['Centro']):
-            centro_buscar = "CP Lledoners" if centro == "CP Lledoners (Pilot M1)" else centro
+            centro_buscar = centro
             
             if centro_buscar in acumulados:
                 df_base.at[idx, 'N_Consultes'] = acumulados[centro_buscar]['llamadas']
@@ -326,7 +497,7 @@ def procesar_reserves(files):
     df_resultados = pd.DataFrame(resultados)
     
     for idx, centro in enumerate(df_base['Centro']):
-        centro_buscar = "CP Lledoners" if centro == "CP Lledoners (Pilot M1)" else centro
+        centro_buscar = centro
         
         if centro_buscar in df_resultados['Centro'].values:
             fila = df_resultados[df_resultados['Centro'] == centro_buscar].iloc[0]
@@ -417,25 +588,21 @@ def combinar_resultados(dfs_dict):
     if 'Consultes' in dfs_dict:
         df = dfs_dict['Consultes']
         df_final['N_Consultes'] = df['N_Consultes']
-        df_final['Interns_Consultes'] = df['Interns_Consultes']
-    
+
     # Reserves
     if 'Reserves' in dfs_dict:
         df = dfs_dict['Reserves']
         df_final['N_Reserves'] = df['N_Reserves']
-        df_final['Interns_Reserves'] = df['Interns_Reserves']
-    
+
     # Alta Digital
     df_final['Alta_Digital'] = ''
-    df_final['N_Alta'] = ''
     
     # Añadir fila de totales
     totales = {'Interns': '', 'Inici VeD': '', 'Centro': 'TOTAL', 'Alta_Digital': '', 'N_Alta': ''}
     
     for col in df_final.columns:
         if col.startswith('N_') or col.startswith('Minuts_') or col.startswith('Interns_'):
-            if col not in ['N_Alta']:
-                totales[col] = df_final[col].apply(lambda x: x if isinstance(x, (int, float)) else 0).sum()
+            totales[col] = df_final[col].apply(lambda x: x if isinstance(x, (int, float)) else 0).sum()
         elif col.startswith('%'):
             totales[col] = ''
     
@@ -466,6 +633,10 @@ def main():
         st.session_state['resultados_ved'] = {}
     if 'df_final_ved' not in st.session_state:
         st.session_state['df_final_ved'] = None
+    if 'df_acumulada_ved' not in st.session_state:
+        st.session_state['df_acumulada_ved'] = None
+    if 'df_acumulada_manual_confirmada' not in st.session_state:
+        st.session_state['df_acumulada_manual_confirmada'] = None
     # -----------------------------------------------
     
     st.divider()
@@ -510,6 +681,77 @@ def main():
             accept_multiple_files=True,
             key="reserves"
         )
+
+        st.divider()
+
+        # Sección para tabla acumulada (opcional)
+        st.markdown("#### 📊 Taula Acumulada Anterior (Opcional)")
+        st.caption("Tria com vols proporcionar les dades acumulades del mes anterior:")
+
+        # Pestañas para elegir método
+        tab_acum1, tab_acum2 = st.tabs(["📋 Enganxar des d'Excel", "📁 Pujar arxiu Excel"])
+
+        with tab_acum1:
+            st.markdown("**Copia les dades des d'Excel i enganxa-les directament a la taula:**")
+            st.caption("Pots copiar des d'Excel (Ctrl+C) i enganxar aquí (Ctrl+V)")
+            
+            # Crear DataFrame template vacío con las columnas correctas
+            # Crear DataFrame template vacío con las columnas correctas
+            columnas_template = [
+                'Centro', 'Interns', 'Inici VeD',
+                'N_Trucades', '%Incre_Trucades', 'Minuts_Trucades', '%Incre_Minuts_T', 'Interns_Trucades',
+                'N_Videotrucades', '%Incre_Video', 'Minuts_Videotrucades', '%Incre_Minuts_V', 'Interns_Videotrucades',
+                'N_Videovisites', '%Incre_Visites', 'Minuts_Videovisites', '%Incre_Minuts_Vi', 'Interns_Videovisites',
+                'N_Consultes',
+                'N_Reserves',
+                'Alta_Digital'
+            ]
+            
+            # DataFrame vacío con 21 filas (20 centros + TOTAL)
+            num_centros = len(ORDEN_CENTROS)
+            df_template = pd.DataFrame('', index=range(num_centros + 1), columns=columnas_template)
+
+            # Pre-llenar la columna Centro con los nombres
+            for idx, centro in enumerate(ORDEN_CENTROS):
+                df_template.at[idx, 'Centro'] = centro
+
+            # Añadir fila TOTAL al final
+            df_template.at[num_centros, 'Centro'] = 'TOTAL'
+            
+            # Data editor editable
+            df_acumulada_manual = st.data_editor(
+                df_template,
+                use_container_width=True,
+                height=400,
+                key="acumulada_manual",
+                num_rows="fixed"
+            )
+            
+            # Guardar en session_state si hay datos
+            if st.button("✅ Confirmar dades enganxades", key="confirmar_manual"):
+                # Verificar que hay datos (al menos una celda numérica rellena)
+                columnas_numericas = [col for col in df_acumulada_manual.columns 
+                                    if col.startswith('N_') or col.startswith('Minuts_') or col.startswith('Interns_')]
+                hay_datos = False
+                for col in columnas_numericas:
+                    if df_acumulada_manual[col].astype(str).str.strip().ne('').any():
+                        hay_datos = True
+                        break
+                
+                if hay_datos:
+                    st.session_state['df_acumulada_manual_confirmada'] = df_acumulada_manual.copy()
+                    st.success("✅ Dades de la taula acumulada confirmades!")
+                else:
+                    st.warning("⚠️ No s'han detectat dades. Enganxa les dades des d'Excel.")
+
+        with tab_acum2:
+
+            acumulada_file = st.file_uploader(
+                "Selecciona l'arxiu de Taula Acumulada",
+                type=['xlsx', 'xls'],
+                accept_multiple_files=False,
+                key="acumulada"
+            )
     
     st.divider()
     
@@ -579,12 +821,46 @@ def main():
         
         # --- GUARDAR RESULTADOS EN SESSION_STATE (MODIFICADO) ---
         if resultados:
+            df_actual = combinar_resultados(resultados)
             st.session_state['resultados_ved'] = resultados
-            st.session_state['df_final_ved'] = combinar_resultados(resultados)
+            st.session_state['df_final_ved'] = df_actual
+            
+            # Procesar tabla acumulada si existe
+            # Procesar tabla acumulada (desde Excel o manual)
+            df_anterior = None
+
+            # Prioridad 1: Desde archivo Excel
+            if acumulada_file:
+                status_text.text("Processant taula acumulada des d'arxiu...")
+                df_anterior = extraer_tabla_acumulada_anterior(acumulada_file)
+
+            # Prioridad 2: Desde datos manuales pegados
+            elif st.session_state.get('df_acumulada_manual_confirmada') is not None:
+                status_text.text("Processant taula acumulada enganxada...")
+                df_anterior = st.session_state['df_acumulada_manual_confirmada'].copy()
+                
+                # Limpiar datos pegados (eliminar espacios y convertir a números)
+                columnas_numericas = [col for col in df_anterior.columns 
+                                    if col.startswith('N_') or col.startswith('Minuts_') or col.startswith('Interns_')]
+                
+                for col in columnas_numericas:
+                    # Eliminar espacios en blanco de los números antes de convertir
+                    df_anterior[col] = df_anterior[col].astype(str).str.replace(' ', '').str.strip()
+                    df_anterior[col] = pd.to_numeric(df_anterior[col], errors='coerce').fillna(0)
+                
+                st.success("✅ Taula acumulada carregada des de dades enganxades")
+
+            # Calcular acumulada si hay datos anteriores
+            if df_anterior is not None:
+                df_acumulada = calcular_tabla_acumulada(df_actual, df_anterior)
+                st.session_state['df_acumulada_ved'] = df_acumulada
+            else:
+                st.session_state['df_acumulada_ved'] = None
+            
             st.session_state['processing_complete'] = True
             
             st.success("✅ Processament completat amb èxit!")
-            st.rerun() # Fuerza la re-ejecución para salir de este bloque y mostrar las pestañas
+            st.rerun()
         else:
             st.error("⚠️ No s'ha pogut processar cap dada. Assegura't que els arxius són correctes.")
             st.session_state['processing_complete'] = False
@@ -628,8 +904,13 @@ def main():
                     dataframes_disponibles["Reserves"] = resultados['Reserves']
                 
                 # Añadir tabla general
-                opciones_tabla.append("Taula General")
-                dataframes_disponibles["Taula General"] = df_final
+                opciones_tabla.append("Taula General (Actual)")
+                dataframes_disponibles["Taula General (Actual)"] = df_final
+                
+                # Añadir tabla acumulada si existe
+                if st.session_state.get('df_acumulada_ved') is not None:
+                    opciones_tabla.append("Taula General (Acumulada)")
+                    dataframes_disponibles["Taula General (Acumulada)"] = st.session_state['df_acumulada_ved']
                 
                 # El selectbox ahora está fuera del bloque if del botón y mantiene el estado.
                 tabla_seleccionada = st.selectbox(
@@ -643,15 +924,16 @@ def main():
                 df_mostrar = dataframes_disponibles[tabla_seleccionada].copy()
                 
                 # Añadir fila de totales si no es la tabla general (que ya la tiene)
-                if tabla_seleccionada != "Taula General":
+                # Añadir fila de totales si no es la tabla general (que ya la tiene)
+                if tabla_seleccionada != "Taula General (Actual)" and tabla_seleccionada != "Taula General (Acumulada)":
                     totales = {}
                     for col in df_mostrar.columns:
                         if col == 'Centro':
                             totales[col] = 'TOTAL'
                         elif col.startswith('N_') or col.startswith('Minuts_') or col.startswith('Interns_'):
-                            totales[col] = df_mostrar[col].sum()
+                            totales[col] = df_mostrar[col].apply(lambda x: x if isinstance(x, (int, float)) else 0).sum()
                         else:
-                            totales[col] = 0
+                            totales[col] = ''
                     df_mostrar = pd.concat([df_mostrar, pd.DataFrame([totales])], ignore_index=True)
                 
                 df_mostrar_formatted = formatear_numeros_df(df_mostrar)
