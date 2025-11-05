@@ -40,6 +40,7 @@ MAPEO_CENTROS = {
     "CENTRE PENITENCIARI OBERT TARRAGONA": "CP Obert Tarragona",
     "CENTRE PENITENCIARI OBERT DE TARRAGONA": "CP Obert Tarragona",
     "CENTRE PENITENCIARI TERRASSA": "CP Terrassa",
+    "CENTRE PENITENCIARI QUATRE CAMINS": "CP Quatre Camins",
     "CENTRE EDUCATIU CAN LLUPIÀ": "CE Can Llupià",
     "CENTRE EDUCATIU L'ALZINA": "CE L'Alzina",
     "CENTRE EDUCATIU MONTILIVI": "CE Montilivi",
@@ -65,6 +66,7 @@ ORDEN_CENTROS = [
     "CP Obert Lleida",
     "CP Obert BCN",
     "CP Obert Tarragona",
+    "CP Quatre Camins",
     "CE Can Llupià",
     "CE L'Alzina",
     "CE Montilivi",
@@ -157,8 +159,8 @@ def calcular_tabla_acumulada(df_actual, df_anterior):
     if df_anterior is None:
         return df_actual
     
-    print("df_actual: ",df_actual)
-    print("df_anterior: ",df_anterior)
+    #print("df_actual: ",df_actual)
+    #print("df_anterior: ",df_anterior)
 
     df_acumulada = df_actual.copy()
 
