@@ -396,58 +396,58 @@ def procesar_trucades_video(files, tipo="Trucades"):
     
     return df_base
 
-def procesar_consultes(file):
-    """Procesa archivo de consultes con múltiples hojas"""
-    if not file:
+def procesar_consultes(files):
+    """Procesa archivos de consultes con múltiples hojas"""
+    if not files:
         return None
     
-    try:
-        excel_file = pd.ExcelFile(file)
-        acumulados = defaultdict(lambda: {'llamadas': 0, 'internos_unicos': set()})
+    acumulados = defaultdict(lambda: {'llamadas': 0, 'internos_unicos': set()})
+    
+    for file in files:
+        try:
+            excel_file = pd.ExcelFile(file)
         
-        for hoja in excel_file.sheet_names:
-            try:
-                df = pd.read_excel(file, sheet_name=hoja)
-                
-                if 'CENTRE' not in df.columns or 'ID_USUARI' not in df.columns:
-                    continue
-                
-                for centro_original in df['CENTRE'].unique():
-                    if pd.isna(centro_original):
+            for hoja in excel_file.sheet_names:
+                try:
+                    df = pd.read_excel(file, sheet_name=hoja)
+                    
+                    if 'CENTRE' not in df.columns or 'ID_USUARI' not in df.columns:
                         continue
+                    
+                    for centro_original in df['CENTRE'].unique():
+                        if pd.isna(centro_original):
+                            continue
+                            
+                        df_centro = df[df['CENTRE'] == centro_original]
+                        centro = MAPEO_CENTROS.get(centro_original.upper(), centro_original)
                         
-                    df_centro = df[df['CENTRE'] == centro_original]
-                    centro = MAPEO_CENTROS.get(centro_original.upper(), centro_original)
-                    
-                    n_llamadas = len(df_centro)
-                    ids_unicos = set(df_centro['ID_USUARI'].dropna().unique())
-                    
-                    acumulados[centro]['llamadas'] += n_llamadas
-                    acumulados[centro]['internos_unicos'].update(ids_unicos)
-                    
-            except Exception as e:
-                st.warning(f"Error en hoja {hoja}: {e}")
-                continue
-        
-        # Crear DataFrame con resultados
-        df_base = pd.DataFrame({
-            'Centro': ORDEN_CENTROS,
-            'N_Consultes': 0,
-            'Interns_Consultes': 0
-        })
-        
-        for idx, centro in enumerate(df_base['Centro']):
-            centro_buscar = centro
+                        n_llamadas = len(df_centro)
+                        ids_unicos = set(df_centro['ID_USUARI'].dropna().unique())
+                        
+                        acumulados[centro]['llamadas'] += n_llamadas
+                        acumulados[centro]['internos_unicos'].update(ids_unicos)
+                        
+                except Exception as e:
+                    st.warning(f"Error en hoja {hoja}: {e}")
+                    continue
             
-            if centro_buscar in acumulados:
-                df_base.at[idx, 'N_Consultes'] = acumulados[centro_buscar]['llamadas']
-                df_base.at[idx, 'Interns_Consultes'] = len(acumulados[centro_buscar]['internos_unicos'])
-        
-        return df_base
-        
-    except Exception as e:
-        st.error(f"Error procesando consultes: {e}")
-        return None
+            # Crear DataFrame con resultados
+            df_base = pd.DataFrame({
+                'Centro': ORDEN_CENTROS,
+                'N_Consultes': 0,
+                'Interns_Consultes': 0
+            })
+            
+            for idx, centro in enumerate(df_base['Centro']):
+                centro_buscar = centro
+                
+                if centro_buscar in acumulados:
+                    df_base.at[idx, 'N_Consultes'] = acumulados[centro_buscar]['llamadas']
+                    df_base.at[idx, 'Interns_Consultes'] = len(acumulados[centro_buscar]['internos_unicos'])
+        except Exception as e:
+            st.error(f"Error procesando consultes: {e}")
+
+    return df_base
 
 def procesar_reserves(files):
     """Procesa archivos de reserves"""
@@ -508,52 +508,77 @@ def procesar_reserves(files):
     
     return df_base
 
-def procesar_video_combinado(file):
-    """Procesa archivo combinado con hojas VIDEOTRUCADES y VIDEOVISITES"""
-    if not file:
+def procesar_video_combinado(files):
+    """Procesa archivos combinados con hojas VIDEOTRUCADES y VIDEOVISITES"""
+    if not files:
         return None, None
     
-    try:
-        excel_file = pd.ExcelFile(file)
-        
-        df_videotrucades = None
-        df_videovisites = None
-        
-        # Procesar hoja VIDEOTRUCADES
-        if 'VIDEOTRUCADES' in excel_file.sheet_names:
-            df_temp = pd.read_excel(file, sheet_name='VIDEOTRUCADES')
-            # Convertir a lista de un solo archivo para reutilizar función existente
-            temp_file = BytesIO()
-            df_temp.to_excel(temp_file, index=False)
-            temp_file.seek(0)
-            temp_file.name = "videotrucades_temp.xlsx"
+    # Acumular resultados de todos los archivos
+    todos_videotrucades = []
+    todos_videovisites = []
+    
+    for file in files:
+        try:
+            excel_file = pd.ExcelFile(file)
             
-            df_videotrucades = procesar_trucades_video([temp_file], "Videotrucades")
-        
-        # Procesar hoja VIDEOVISITES
-        if 'VIDEOVISITES' in excel_file.sheet_names:
-            df_temp = pd.read_excel(file, sheet_name='VIDEOVISITES')
-            temp_file = BytesIO()
-            df_temp.to_excel(temp_file, index=False)
-            temp_file.seek(0)
-            temp_file.name = "videovisites_temp.xlsx"
+            df_videotrucades = None
+            df_videovisites = None
             
-            df_videovisites = procesar_trucades_video([temp_file], "Videovisites")
-        
-        return df_videotrucades, df_videovisites
-        
-    except Exception as e:
-        st.error(f"Error procesando archivo combinado: {e}")
-        return None, None
+            # Procesar hoja VIDEOTRUCADES
+            if 'VIDEOTRUCADES' in excel_file.sheet_names:
+                df_temp = pd.read_excel(file, sheet_name='VIDEOTRUCADES')
+                # Convertir a lista de un solo archivo para reutilizar función existente
+                temp_file = BytesIO()
+                df_temp.to_excel(temp_file, index=False)
+                temp_file.seek(0)
+                temp_file.name = "videotrucades_temp.xlsx"
+                
+                df_videotrucades = procesar_trucades_video([temp_file], "Videotrucades")
+            
+            # Procesar hoja VIDEOVISITES
+            if 'VIDEOVISITES' in excel_file.sheet_names:
+                df_temp = pd.read_excel(file, sheet_name='VIDEOVISITES')
+                temp_file = BytesIO()
+                df_temp.to_excel(temp_file, index=False)
+                temp_file.seek(0)
+                temp_file.name = "videovisites_temp.xlsx"
+                
+                df_videovisites = procesar_trucades_video([temp_file], "Videovisites")
+            
+            if df_videotrucades is not None:
+                todos_videotrucades.append(df_videotrucades)
+            if df_videovisites is not None:
+                todos_videovisites.append(df_videovisites)
+                
+        except Exception as e:
+            st.error(f"Error procesando archivo combinado {file.name}: {e}")
+            continue
+    # Combinar todos los DataFrames (sumar valores por centro)
+    df_videotrucades_final = None
+    df_videovisites_final = None
+    
+    if todos_videotrucades:
+        df_videotrucades_final = todos_videotrucades[0].copy()
+        for df in todos_videotrucades[1:]:
+            for col in ['N_Videotrucades', 'Minuts_Videotrucades', 'Interns_Videotrucades']:
+                df_videotrucades_final[col] = df_videotrucades_final[col] + df[col]
+    
+    if todos_videovisites:
+        df_videovisites_final = todos_videovisites[0].copy()
+        for df in todos_videovisites[1:]:
+            for col in ['N_Videovisites', 'Minuts_Videovisites', 'Interns_Videovisites']:
+                df_videovisites_final[col] = df_videovisites_final[col] + df[col]
+    
+    return df_videotrucades_final, df_videovisites_final
 
 def combinar_resultados(dfs_dict):
     """Combina todos los DataFrames de resultados en una tabla final"""
     
     # Empezar con el DataFrame base
     df_final = pd.DataFrame({
+        'Centro': ORDEN_CENTROS,
         'Interns': [''] * len(ORDEN_CENTROS),
-        'Inici VeD': [''] * len(ORDEN_CENTROS),
-        'Centro': ORDEN_CENTROS
+        'Inici VeD': [''] * len(ORDEN_CENTROS)
     })
     
     # Definir el orden de las columnas según la tabla objetivo
@@ -600,7 +625,7 @@ def combinar_resultados(dfs_dict):
     df_final['Alta_Digital'] = ''
     
     # Añadir fila de totales
-    totales = {'Interns': '', 'Inici VeD': '', 'Centro': 'TOTAL', 'Alta_Digital': '', 'N_Alta': ''}
+    totales = {'Centro': 'TOTAL', 'Interns': '', 'Inici VeD': '', 'Alta_Digital': '', 'N_Alta': ''}
     
     for col in df_final.columns:
         if col.startswith('N_') or col.startswith('Minuts_') or col.startswith('Interns_'):
@@ -639,67 +664,144 @@ def main():
         st.session_state['df_acumulada_ved'] = None
     if 'df_acumulada_manual_confirmada' not in st.session_state:
         st.session_state['df_acumulada_manual_confirmada'] = None
+    if 'df_actual_manual_confirmada' not in st.session_state:
+        st.session_state['df_actual_manual_confirmada'] = None
+    if 'df_acum_manual_modo2_confirmada' not in st.session_state:
+        st.session_state['df_acum_manual_modo2_confirmada'] = None
     # -----------------------------------------------
     
+    
+    st.markdown("### ⚙️ Mode d'entrada de dades")
+    modo_manual = st.toggle("Activar mode manual (sense pujar arxius)", value=False, key="modo_manual")
+
     st.divider()
     
-    # Crear columnas para los file uploaders
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("#### 📞 Trucades de veu")
-        st.caption("Formats acceptats: .xlsx, .csv")
-        trucades_files = st.file_uploader(
-            "Selecciona arxius de Trucades",
-            type=['xlsx', 'xls', 'csv'],
-            accept_multiple_files=True,
-            key="trucades"
-        )
+    #MODO CON DOS INSERTAR----------------- (se puede hacer acortar reutilizando lo de la acumulada)
+    if not modo_manual:
+        # Crear columnas para los file uploaders
+        col1, col2 = st.columns(2)
         
-        st.markdown("#### 🎥 Videotrucades i Videovisites")
-        st.caption("Format acceptat: .xlsx amb 2 fulles (VIDEOTRUCADES i VIDEOVISITES)")
-        video_combined_file = st.file_uploader(
-            "Selecciona l'arxiu combinat de Video",
-            type=['xlsx', 'xls'],
-            accept_multiple_files=False,
-            key="video_combined"
-        )
-    
-    with col2:
-        st.markdown("#### 💻 Consultes Autoservei")
-        st.caption("Format acceptat: .xlsx (amb múltiples fulles)")
-        consultes_file = st.file_uploader(
-            "Selecciona l'arxiu de Consultes",
-            type=['xlsx', 'xls'],
-            accept_multiple_files=False,
-            key="consultes"
-        )
-        
-        st.markdown("#### 📅 Reserves")
-        st.caption("Formats acceptats: .xlsx, .csv")
-        reserves_files = st.file_uploader(
-            "Selecciona arxius de Reserves",
-            type=['xlsx', 'xls', 'csv'],
-            accept_multiple_files=True,
-            key="reserves"
-        )
-
-        st.divider()
-
-        # Sección para tabla acumulada (opcional)
-        st.markdown("#### 📊 Taula Acumulada Anterior (Opcional)")
-        st.caption("Tria com vols proporcionar les dades acumulades del mes anterior:")
-
-        # Pestañas para elegir método
-        tab_acum1, tab_acum2 = st.tabs(["📋 Enganxar des d'Excel", "📁 Pujar arxiu Excel"])
-
-        with tab_acum1:
-            st.markdown("**Copia les dades des d'Excel i enganxa-les directament a la taula:**")
-            st.caption("Pots copiar des d'Excel (Ctrl+C) i enganxar aquí (Ctrl+V)")
+        with col1:
+            st.markdown("#### 📞 Trucades de veu")
+            st.caption("Formats acceptats: .xlsx, .csv")
+            trucades_files = st.file_uploader(
+                "Selecciona arxius de Trucades",
+                type=['xlsx', 'xls', 'csv'],
+                accept_multiple_files=True,
+                key="trucades"
+            )
             
-            # Crear DataFrame template vacío con las columnas correctas
-            # Crear DataFrame template vacío con las columnas correctas
-            columnas_template = [
+            st.markdown("#### 🎥 Videotrucades i Videovisites")
+            st.caption("Format acceptat: .xlsx amb 2 fulles (VIDEOTRUCADES i VIDEOVISITES)")
+            video_combined_files = st.file_uploader(
+                "Selecciona l'arxiu combinat de Video",
+                type=['xlsx', 'xls'],
+                accept_multiple_files=True,
+                key="video_combined"
+            )
+        
+        with col2:
+            st.markdown("#### 💻 Consultes Autoservei")
+            st.caption("Format acceptat: .xlsx (amb múltiples fulles)")
+            consultes_files = st.file_uploader(
+                "Selecciona l'arxiu de Consultes",
+                type=['xlsx', 'xls'],
+                accept_multiple_files=True,
+                key="consultes"
+            )
+            
+            st.markdown("#### 📅 Reserves")
+            st.caption("Formats acceptats: .xlsx, .csv")
+            reserves_files = st.file_uploader(
+                "Selecciona arxius de Reserves",
+                type=['xlsx', 'xls', 'csv'],
+                accept_multiple_files=True,
+                key="reserves"
+            )
+
+            st.divider()
+
+            # Sección para tabla acumulada (opcional)
+            st.markdown("#### 📊 Taula Acumulada Anterior (Opcional)")
+            st.caption("Tria com vols proporcionar les dades acumulades del mes anterior:")
+
+            # Pestañas para elegir método
+            tab_acum1, tab_acum2 = st.tabs(["📋 Enganxar des d'Excel", "📁 Pujar arxiu Excel"])
+
+            with tab_acum1:
+                st.markdown("**Copia les dades des d'Excel i enganxa-les directament a la taula:**")
+                st.caption("Pots copiar des d'Excel (Ctrl+C) i enganxar aquí (Ctrl+V)")
+                
+                # Crear DataFrame template vacío con las columnas correctas
+                # Crear DataFrame template vacío con las columnas correctas
+                columnas_template = [
+                    'Centro', 'Interns', 'Inici VeD',
+                    'N_Trucades', '%Incre_Trucades', 'Minuts_Trucades', '%Incre_Minuts_T', 'Interns_Trucades',
+                    'N_Videotrucades', '%Incre_Video', 'Minuts_Videotrucades', '%Incre_Minuts_V', 'Interns_Videotrucades',
+                    'N_Videovisites', '%Incre_Visites', 'Minuts_Videovisites', '%Incre_Minuts_Vi', 'Interns_Videovisites',
+                    'N_Consultes',
+                    'N_Reserves',
+                    'Alta_Digital'
+                ]
+                
+                # DataFrame vacío con 21 filas (20 centros + TOTAL)
+                num_centros = len(ORDEN_CENTROS)
+                df_template = pd.DataFrame('', index=range(num_centros + 1), columns=columnas_template)
+
+                # Pre-llenar la columna Centro con los nombres
+                for idx, centro in enumerate(ORDEN_CENTROS):
+                    df_template.at[idx, 'Centro'] = centro
+
+                # Añadir fila TOTAL al final
+                df_template.at[num_centros, 'Centro'] = 'TOTAL'
+                
+                # Data editor editable
+                df_acumulada_manual = st.data_editor(
+                    df_template,
+                    use_container_width=True,
+                    height=400,
+                    key="acumulada_manual",
+                    num_rows="fixed"
+                )
+                
+                # Guardar en session_state si hay datos
+                if st.button("✅ Confirmar dades enganxades", key="confirmar_manual"):
+                    # Verificar que hay datos (al menos una celda numérica rellena)
+                    columnas_numericas = [col for col in df_acumulada_manual.columns 
+                                        if col.startswith('N_') or col.startswith('Minuts_') or col.startswith('Interns_')]
+                    hay_datos = False
+                    for col in columnas_numericas:
+                        if df_acumulada_manual[col].astype(str).str.strip().ne('').any():
+                            hay_datos = True
+                            break
+                    
+                    if hay_datos:
+                        st.session_state['df_acumulada_manual_confirmada'] = df_acumulada_manual.copy()
+                        st.success("✅ Dades de la taula acumulada confirmades!")
+                    else:
+                        st.warning("⚠️ No s'han detectat dades. Enganxa les dades des d'Excel.")
+
+            with tab_acum2:
+
+                acumulada_file = st.file_uploader(
+                    "Selecciona l'arxiu de Taula Acumulada",
+                    type=['xlsx', 'xls'],
+                    accept_multiple_files=False,
+                    key="acumulada"
+                )
+
+    else:
+    # MODO MANUAL: Insertar tabla actual y acumulada
+        st.markdown("### 📋 Mode Manual: Enganxa les taules directament")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### 📊 Taula Actual (Dades del mes)")
+            st.caption("Enganxa les dades actuals des d'Excel")
+            
+            # Crear DataFrame template para tabla actual
+            columnas_actual = [
                 'Centro', 'Interns', 'Inici VeD',
                 'N_Trucades', '%Incre_Trucades', 'Minuts_Trucades', '%Incre_Minuts_T', 'Interns_Trucades',
                 'N_Videotrucades', '%Incre_Video', 'Minuts_Videotrucades', '%Incre_Minuts_V', 'Interns_Videotrucades',
@@ -709,164 +811,211 @@ def main():
                 'Alta_Digital'
             ]
             
-            # DataFrame vacío con 21 filas (20 centros + TOTAL)
             num_centros = len(ORDEN_CENTROS)
-            df_template = pd.DataFrame('', index=range(num_centros + 1), columns=columnas_template)
-
-            # Pre-llenar la columna Centro con los nombres
-            for idx, centro in enumerate(ORDEN_CENTROS):
-                df_template.at[idx, 'Centro'] = centro
-
-            # Añadir fila TOTAL al final
-            df_template.at[num_centros, 'Centro'] = 'TOTAL'
+            df_template_actual = pd.DataFrame('', index=range(num_centros + 1), columns=columnas_actual)
             
-            # Data editor editable
-            df_acumulada_manual = st.data_editor(
-                df_template,
+            for idx, centro in enumerate(ORDEN_CENTROS):
+                df_template_actual.at[idx, 'Centro'] = centro
+            df_template_actual.at[num_centros, 'Centro'] = 'TOTAL'
+            
+            df_actual_manual = st.data_editor(
+                df_template_actual,
                 use_container_width=True,
-                height=400,
-                key="acumulada_manual",
+                height=500,
+                key="actual_manual",
                 num_rows="fixed"
             )
             
-            # Guardar en session_state si hay datos
-            if st.button("✅ Confirmar dades enganxades", key="confirmar_manual"):
-                # Verificar que hay datos (al menos una celda numérica rellena)
-                columnas_numericas = [col for col in df_acumulada_manual.columns 
+            if st.button("✅ Confirmar Taula Actual", key="confirmar_actual_manual"):
+                # Limpiar y convertir datos
+                columnas_numericas = [col for col in df_actual_manual.columns 
                                     if col.startswith('N_') or col.startswith('Minuts_') or col.startswith('Interns_')]
-                hay_datos = False
-                for col in columnas_numericas:
-                    if df_acumulada_manual[col].astype(str).str.strip().ne('').any():
-                        hay_datos = True
-                        break
                 
-                if hay_datos:
-                    st.session_state['df_acumulada_manual_confirmada'] = df_acumulada_manual.copy()
-                    st.success("✅ Dades de la taula acumulada confirmades!")
-                else:
-                    st.warning("⚠️ No s'han detectat dades. Enganxa les dades des d'Excel.")
-
-        with tab_acum2:
-
-            acumulada_file = st.file_uploader(
-                "Selecciona l'arxiu de Taula Acumulada",
-                type=['xlsx', 'xls'],
-                accept_multiple_files=False,
-                key="acumulada"
+                df_limpio = df_actual_manual.copy()
+                for col in columnas_numericas:
+                    df_limpio[col] = df_limpio[col].astype(str).str.replace(' ', '').str.strip()
+                    df_limpio[col] = pd.to_numeric(df_limpio[col], errors='coerce').fillna(0)
+                
+                st.session_state['df_actual_manual_confirmada'] = df_limpio
+                st.success("✅ Taula Actual confirmada!")
+        
+        with col2:
+            st.markdown("#### 📊 Taula Acumulada Anterior")
+            st.caption("Enganxa les dades acumulades del mes anterior")
+            
+            num_centros = len(ORDEN_CENTROS)
+            df_template_acum_manual = pd.DataFrame('', index=range(num_centros + 1), columns=columnas_actual)
+            
+            for idx, centro in enumerate(ORDEN_CENTROS):
+                df_template_acum_manual.at[idx, 'Centro'] = centro
+            df_template_acum_manual.at[num_centros, 'Centro'] = 'TOTAL'
+            
+            df_acum_manual_modo2 = st.data_editor(
+                df_template_acum_manual,
+                use_container_width=True,
+                height=500,
+                key="acum_manual_modo2",
+                num_rows="fixed"
             )
-    
+            
+            if st.button("✅ Confirmar Taula Acumulada", key="confirmar_acum_manual_modo2"):
+                # Limpiar y convertir datos
+                columnas_numericas = [col for col in df_acum_manual_modo2.columns 
+                                    if col.startswith('N_') or col.startswith('Minuts_') or col.startswith('Interns_')]
+                
+                df_limpio = df_acum_manual_modo2.copy()
+                for col in columnas_numericas:
+                    df_limpio[col] = df_limpio[col].astype(str).str.replace(' ', '').str.strip()
+                    df_limpio[col] = pd.to_numeric(df_limpio[col], errors='coerce').fillna(0)
+                
+                st.session_state['df_acum_manual_modo2_confirmada'] = df_limpio
+                st.success("✅ Taula Acumulada confirmada!")
+        
     st.divider()
     
     # Botón de procesar
     if st.button("🚀 Processar Dades", type="primary", use_container_width=True):
         
-        # Verificar que hay al menos un archivo
-        if not any([trucades_files, video_combined_file, consultes_file, reserves_files]):
-            st.error("⚠️ Si us plau, carrega almenys un arxiu per processar.")
-            # Borrar estado si estaba en True
-            st.session_state['processing_complete'] = False 
+        # MODO MANUAL
+        if modo_manual:
+            # Verificar que hay tablas confirmadas
+            if st.session_state.get('df_actual_manual_confirmada') is None:
+                st.error("⚠️ Si us plau, confirma la Taula Actual.")
+                st.session_state['processing_complete'] = False
+                return
+            
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            status_text.text("Processant taules manuals...")
+            
+            df_actual = st.session_state['df_actual_manual_confirmada'].copy()
+            df_anterior = st.session_state.get('df_acum_manual_modo2_confirmada')
+            
             st.session_state['resultados_ved'] = {}
-            st.session_state['df_final_ved'] = None
-            return
-        
-        # Crear barra de progreso
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        resultados = {}
-        progress = 0
-        total_steps = 5
-        
-        # Procesar Trucades
-        if trucades_files:
-            status_text.text("Processant Trucades de veu...")
-            df_trucades = procesar_trucades_video(trucades_files, "Trucades")
-            if df_trucades is not None:
-                resultados['Trucades'] = df_trucades
-            progress += 1
-            progress_bar.progress(progress / total_steps)
-        
-        # Procesar Videotrucades
-        # Procesar Videotrucades y Videovisites desde archivo combinado
-        if video_combined_file:
-            status_text.text("Processant Videotrucades i Videovisites...")
-            df_videotrucades, df_videovisites = procesar_video_combinado(video_combined_file)
-            
-            if df_videotrucades is not None:
-                resultados['Videotrucades'] = df_videotrucades
-            if df_videovisites is not None:
-                resultados['Videovisites'] = df_videovisites
-            
-            progress += 1
-            progress_bar.progress(progress / total_steps)
-        
-        # Procesar Consultes
-        if consultes_file:
-            status_text.text("Processant Consultes Autoservei...")
-            df_consultes = procesar_consultes(consultes_file)
-            if df_consultes is not None:
-                resultados['Consultes'] = df_consultes
-            progress += 1
-            progress_bar.progress(progress / total_steps)
-        
-        # Procesar Reserves
-        if reserves_files:
-            status_text.text("Processant Reserves...")
-            df_reserves = procesar_reserves(reserves_files)
-            if df_reserves is not None:
-                resultados['Reserves'] = df_reserves
-            progress += 1
-            progress_bar.progress(progress / total_steps)
-        
-        progress_bar.progress(1.0)
-        status_text.text("Generant informe final...")
-        
-        # --- GUARDAR RESULTADOS EN SESSION_STATE (MODIFICADO) ---
-        if resultados:
-            df_actual = combinar_resultados(resultados)
-            st.session_state['resultados_ved'] = resultados
             st.session_state['df_final_ved'] = df_actual
             
-            # Procesar tabla acumulada si existe
-            # Procesar tabla acumulada (desde Excel o manual)
-            df_anterior = None
-
-            # Prioridad 1: Desde archivo Excel
-            if acumulada_file:
-                status_text.text("Processant taula acumulada des d'arxiu...")
-                df_anterior = extraer_tabla_acumulada_anterior(acumulada_file)
-
-            # Prioridad 2: Desde datos manuales pegados
-            elif st.session_state.get('df_acumulada_manual_confirmada') is not None:
-                status_text.text("Processant taula acumulada enganxada...")
-                df_anterior = st.session_state['df_acumulada_manual_confirmada'].copy()
-                
-                # Limpiar datos pegados (eliminar espacios y convertir a números)
-                columnas_numericas = [col for col in df_anterior.columns 
-                                    if col.startswith('N_') or col.startswith('Minuts_') or col.startswith('Interns_')]
-                
-                for col in columnas_numericas:
-                    # Eliminar espacios en blanco de los números antes de convertir
-                    df_anterior[col] = df_anterior[col].astype(str).str.replace(' ', '').str.strip()
-                    df_anterior[col] = pd.to_numeric(df_anterior[col], errors='coerce').fillna(0)
-                
-                st.success("✅ Taula acumulada carregada des de dades enganxades")
-
-            # Calcular acumulada si hay datos anteriores
+            # Calcular acumulada si existe tabla anterior
             if df_anterior is not None:
                 df_acumulada = calcular_tabla_acumulada(df_actual, df_anterior)
                 st.session_state['df_acumulada_ved'] = df_acumulada
             else:
                 st.session_state['df_acumulada_ved'] = None
             
+            progress_bar.progress(1.0)
             st.session_state['processing_complete'] = True
-            
             st.success("✅ Processament completat amb èxit!")
             st.rerun()
+        
         else:
-            st.error("⚠️ No s'ha pogut processar cap dada. Assegura't que els arxius són correctes.")
-            st.session_state['processing_complete'] = False
-        # ------------------------------------------------------
+            # Verificar que hay al menos un archivo
+            if not any([trucades_files, video_combined_files, consultes_files, reserves_files]):
+                st.error("⚠️ Si us plau, carrega almenys un arxiu per processar.")
+                # Borrar estado si estaba en True
+                st.session_state['processing_complete'] = False 
+                st.session_state['resultados_ved'] = {}
+                st.session_state['df_final_ved'] = None
+                return
+            
+            # Crear barra de progreso
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            resultados = {}
+            progress = 0
+            total_steps = 5
+            
+            # Procesar Trucades
+            if trucades_files:
+                status_text.text("Processant Trucades de veu...")
+                df_trucades = procesar_trucades_video(trucades_files, "Trucades")
+                if df_trucades is not None:
+                    resultados['Trucades'] = df_trucades
+                progress += 1
+                progress_bar.progress(progress / total_steps)
+            
+            # Procesar Videotrucades
+            # Procesar Videotrucades y Videovisites desde archivo combinado
+            # Procesar Videotrucades y Videovisites desde archivos combinados
+            if video_combined_files:
+                status_text.text("Processant Videotrucades i Videovisites...")
+                df_videotrucades, df_videovisites = procesar_video_combinado(video_combined_files)
+                
+                if df_videotrucades is not None:
+                    resultados['Videotrucades'] = df_videotrucades
+                if df_videovisites is not None:
+                    resultados['Videovisites'] = df_videovisites
+                
+                progress += 1
+                progress_bar.progress(progress / total_steps)
+            
+            # Procesar Consultes
+            if consultes_files:
+                status_text.text("Processant Consultes Autoservei...")
+                df_consultes = procesar_consultes(consultes_files)
+                if df_consultes is not None:
+                    resultados['Consultes'] = df_consultes
+                progress += 1
+                progress_bar.progress(progress / total_steps)
+            
+            # Procesar Reserves
+            if reserves_files:
+                status_text.text("Processant Reserves...")
+                df_reserves = procesar_reserves(reserves_files)
+                if df_reserves is not None:
+                    resultados['Reserves'] = df_reserves
+                progress += 1
+                progress_bar.progress(progress / total_steps)
+            
+            progress_bar.progress(1.0)
+            status_text.text("Generant informe final...")
+            
+            # --- GUARDAR RESULTADOS EN SESSION_STATE (MODIFICADO) ---
+            if resultados:
+                df_actual = combinar_resultados(resultados)
+                st.session_state['resultados_ved'] = resultados
+                st.session_state['df_final_ved'] = df_actual
+                
+                # Procesar tabla acumulada si existe
+                # Procesar tabla acumulada (desde Excel o manual)
+                df_anterior = None
+
+                # Prioridad 1: Desde archivo Excel
+                if acumulada_file:
+                    status_text.text("Processant taula acumulada des d'arxiu...")
+                    df_anterior = extraer_tabla_acumulada_anterior(acumulada_file)
+
+                # Prioridad 2: Desde datos manuales pegados
+                elif st.session_state.get('df_acumulada_manual_confirmada') is not None:
+                    status_text.text("Processant taula acumulada enganxada...")
+                    df_anterior = st.session_state['df_acumulada_manual_confirmada'].copy()
+                    
+                    # Limpiar datos pegados (eliminar espacios y convertir a números)
+                    columnas_numericas = [col for col in df_anterior.columns 
+                                        if col.startswith('N_') or col.startswith('Minuts_') or col.startswith('Interns_')]
+                    
+                    for col in columnas_numericas:
+                        # Eliminar espacios en blanco de los números antes de convertir
+                        df_anterior[col] = df_anterior[col].astype(str).str.replace(' ', '').str.strip()
+                        df_anterior[col] = pd.to_numeric(df_anterior[col], errors='coerce').fillna(0)
+                    
+                    st.success("✅ Taula acumulada carregada des de dades enganxades")
+
+                # Calcular acumulada si hay datos anteriores
+                if df_anterior is not None:
+                    df_acumulada = calcular_tabla_acumulada(df_actual, df_anterior)
+                    st.session_state['df_acumulada_ved'] = df_acumulada
+                else:
+                    st.session_state['df_acumulada_ved'] = None
+                
+                st.session_state['processing_complete'] = True
+                
+                st.success("✅ Processament completat amb èxit!")
+                st.rerun()
+            else:
+                st.error("⚠️ No s'ha pogut processar cap dada. Assegura't que els arxius són correctes.")
+                st.session_state['processing_complete'] = False
+            # ------------------------------------------------------
         
     
     # --- MOSTRAR PESTAÑAS SÓLO SI EL PROCESAMIENTO ESTÁ COMPLETO (NUEVO SCOPE) ---
