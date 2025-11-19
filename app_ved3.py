@@ -867,7 +867,8 @@ def main():
                 
                 df_limpio = df_acum_manual_modo2.copy()
                 for col in columnas_numericas:
-                    df_limpio[col] = df_limpio[col].astype(str).str.replace(' ', '').str.strip()
+                    # Eliminar espacios y reemplazar . y , por nada (asumir que son separadores de miles)
+                    df_limpio[col] = df_limpio[col].astype(str).str.replace(' ', '').str.replace('.', '').str.replace(',', '').str.strip()
                     df_limpio[col] = pd.to_numeric(df_limpio[col], errors='coerce').fillna(0)
                 
                 st.session_state['df_acum_manual_modo2_confirmada'] = df_limpio
