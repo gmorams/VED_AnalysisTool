@@ -313,7 +313,8 @@ def procesar_trucades_video(files, tipo="Trucades"):
     if not files:
         return None
     
-    resultados = []
+    # Acumular todos los DataFrames raw
+    dfs_raw = []
     
     for file in files:
         try:
@@ -336,44 +337,64 @@ def procesar_trucades_video(files, tipo="Trucades"):
                 st.warning(f"⚠️ {file.name}: Columnas necesarias no encontradas")
                 continue
             
-            # Filtrar NaN
-            df = df.dropna(subset=[col_centre, col_nis])
+            dfs_raw.append(df)
             
-            # Filtrar por duración si existe
-            if col_duracio:
-                # Primero eliminar filas con "-" en duración
-                df = df[df[col_duracio] != '-']
-                df = df[df[col_duracio] != ' - ']  # Por si tiene espacios
-                df = df[~df[col_duracio].astype(str).str.strip().eq('-')]  # Más robusto
-                
-                # Luego aplicar el filtro de 5 segundos
-                df['minutos_totales'] = df[col_duracio].apply(parsear_duracion)
-                df = df[df['minutos_totales'] > (5/60)]
-            
-            # Procesar por centro
-            for centro_original in df[col_centre].unique():
-                df_centro = df[df[col_centre] == centro_original]
-                centro = MAPEO_CENTROS.get(str(centro_original).upper(), centro_original)
-                
-                n_llamadas = len(df_centro)
-                n_internos = df_centro[col_nis].nunique()
-                
-                minutos_enteros = 0
-                if col_duracio:
-                    minutos_totales = sum(df_centro[col_duracio].apply(parsear_duracion))
-                    minutos_enteros = math.ceil(minutos_totales)
-                
-                resultados.append({
-                    'Centro': centro,
-                    'N': n_llamadas,
-                    'Minuts': minutos_enteros,
-                    'Interns': n_internos
-                })
         except Exception as e:
             st.error(f"Error procesando {file.name}: {e}")
     
-    if not resultados:
+    if not dfs_raw:
         return None
+    
+    # Concatenar todos los DataFrames
+    df_combined = pd.concat(dfs_raw, ignore_index=True)
+    
+    # Buscar columnas en el DataFrame combinado
+    col_centre = None
+    col_nis = None
+    col_duracio = None
+    
+    for col in df_combined.columns:
+        if 'CENTRE' in col.upper():
+            col_centre = col
+        if 'NIS' in col.upper() or 'EXPEDIENT' in col.upper():
+            col_nis = col
+        if 'DURAC' in col.upper():
+            col_duracio = col
+    
+    if not col_centre or not col_nis:
+        return None
+    
+    # Filtrar NaN
+    df_combined = df_combined.dropna(subset=[col_centre, col_nis])
+    
+    # Filtrar por duración si existe
+    if col_duracio:
+        df_combined = df_combined[df_combined[col_duracio] != '-']
+        df_combined = df_combined[df_combined[col_duracio] != ' - ']
+        df_combined = df_combined[~df_combined[col_duracio].astype(str).str.strip().eq('-')]
+        df_combined['minutos_totales'] = df_combined[col_duracio].apply(parsear_duracion)
+        df_combined = df_combined[df_combined['minutos_totales'] > (5/60)]
+    
+    # Procesar por centro
+    resultados = []
+    for centro_original in df_combined[col_centre].unique():
+        df_centro = df_combined[df_combined[col_centre] == centro_original]
+        centro = MAPEO_CENTROS.get(str(centro_original).upper(), centro_original)
+        
+        n_llamadas = len(df_centro)
+        n_internos = df_centro[col_nis].nunique()  # Elimina duplicados correctamente
+        
+        minutos_enteros = 0
+        if col_duracio:
+            minutos_totales = sum(df_centro[col_duracio].apply(parsear_duracion))
+            minutos_enteros = math.ceil(minutos_totales)
+        
+        resultados.append({
+            'Centro': centro,
+            'N': n_llamadas,
+            'Minuts': minutos_enteros,
+            'Interns': n_internos
+        })
     
     # Crear DataFrame base con todos los centros
     df_base = pd.DataFrame({
@@ -387,7 +408,6 @@ def procesar_trucades_video(files, tipo="Trucades"):
     
     # Actualizar valores donde existan
     for idx, centro in enumerate(df_base['Centro']):
-        # Ajustar para CP Lledoners (Pilot M1) -> YA NO SE HACE
         centro_buscar = centro
         
         if centro_buscar in df_resultados['Centro'].values:
@@ -456,7 +476,8 @@ def procesar_reserves(files):
     if not files:
         return None
     
-    resultados = []
+    # Acumular todos los DataFrames raw para unificar y eliminar duplicados correctamente
+    dfs_raw = []
     
     for file in files:
         try:
@@ -472,24 +493,42 @@ def procesar_reserves(files):
             
             if df.empty:
                 continue
-                
-            centro_original = df[col_centre].iloc[0]
-            centro = MAPEO_CENTROS.get(centro_original.upper(), centro_original)
             
-            n_reserves = len(df)
-            n_internos = df[col_nis].nunique()
-            
-            resultados.append({
-                'Centro': centro,
-                'N': n_reserves,
-                'Interns': n_internos
-            })
+            dfs_raw.append(df)
             
         except Exception as e:
             st.error(f"Error procesando {file.name}: {e}")
     
-    if not resultados:
+    if not dfs_raw:
         return None
+    
+    # Concatenar todos los DataFrames
+    df_combined = pd.concat(dfs_raw, ignore_index=True)
+    
+    # Buscar columnas
+    col_centre = 'Centre' if 'Centre' in df_combined.columns else None
+    col_nis = 'NIS/Exp.' if 'NIS/Exp.' in df_combined.columns else None
+    
+    if not col_centre or not col_nis:
+        return None
+    
+    # Procesar por centro
+    resultados = []
+    for centro_original in df_combined[col_centre].unique():
+        if pd.isna(centro_original):
+            continue
+            
+        df_centro = df_combined[df_combined[col_centre] == centro_original]
+        centro = MAPEO_CENTROS.get(str(centro_original).upper(), centro_original)
+        
+        n_reserves = len(df_centro)
+        n_internos = df_centro[col_nis].nunique()  # Elimina duplicados correctamente
+        
+        resultados.append({
+            'Centro': centro,
+            'N': n_reserves,
+            'Interns': n_internos
+        })
     
     # Crear DataFrame base
     df_base = pd.DataFrame({
@@ -515,27 +554,22 @@ def procesar_video_combinado(files):
     if not files:
         return None, None
     
-    # Acumular resultados de todos los archivos
-    todos_videotrucades = []
-    todos_videovisites = []
+    # Acumular DataFrames RAW de todos los archivos para poder eliminar duplicados correctamente
+    dfs_videotrucades_raw = []
+    dfs_videovisites_raw = []
     
     for file in files:
         try:
             excel_file = pd.ExcelFile(file)
             
-            df_videotrucades = None
-            df_videovisites = None
-            
             # Procesar hoja VIDEOTRUCADES
             if 'VIDEOTRUCADES' in excel_file.sheet_names:
                 df_temp = pd.read_excel(file, sheet_name='VIDEOTRUCADES')
-                # Convertir a lista de un solo archivo para reutilizar función existente
                 temp_file = BytesIO()
                 df_temp.to_excel(temp_file, index=False)
                 temp_file.seek(0)
-                temp_file.name = "videotrucades_temp.xlsx"
-                
-                df_videotrucades = procesar_trucades_video([temp_file], "Videotrucades")
+                temp_file.name = f"videotrucades_{file.name}"
+                dfs_videotrucades_raw.append(df_temp)
             
             # Procesar hoja VIDEOVISITES
             if 'VIDEOVISITES' in excel_file.sheet_names:
@@ -543,33 +577,152 @@ def procesar_video_combinado(files):
                 temp_file = BytesIO()
                 df_temp.to_excel(temp_file, index=False)
                 temp_file.seek(0)
-                temp_file.name = "videovisites_temp.xlsx"
-                
-                df_videovisites = procesar_trucades_video([temp_file], "Videovisites")
-            
-            if df_videotrucades is not None:
-                todos_videotrucades.append(df_videotrucades)
-            if df_videovisites is not None:
-                todos_videovisites.append(df_videovisites)
+                temp_file.name = f"videovisites_{file.name}"
+                dfs_videovisites_raw.append(df_temp)
                 
         except Exception as e:
             st.error(f"Error procesando archivo combinado {file.name}: {e}")
             continue
-    # Combinar todos los DataFrames (sumar valores por centro)
+    
+    # Procesar VIDEOTRUCADES unificando datos
     df_videotrucades_final = None
+    if dfs_videotrucades_raw:
+        # Concatenar todos los DataFrames raw
+        df_combined = pd.concat(dfs_videotrucades_raw, ignore_index=True)
+        
+        # Buscar columnas necesarias
+        col_centre = None
+        col_nis = None
+        col_duracio = None
+        
+        for col in df_combined.columns:
+            if 'CENTRE' in col.upper():
+                col_centre = col
+            if 'NIS' in col.upper() or 'EXPEDIENT' in col.upper():
+                col_nis = col
+            if 'DURAC' in col.upper():
+                col_duracio = col
+        
+        if col_centre and col_nis:
+            # Filtrar NaN
+            df_combined = df_combined.dropna(subset=[col_centre, col_nis])
+            
+            # Filtrar por duración si existe
+            if col_duracio:
+                df_combined = df_combined[df_combined[col_duracio] != '-']
+                df_combined = df_combined[df_combined[col_duracio] != ' - ']
+                df_combined = df_combined[~df_combined[col_duracio].astype(str).str.strip().eq('-')]
+                df_combined['minutos_totales'] = df_combined[col_duracio].apply(parsear_duracion)
+                df_combined = df_combined[df_combined['minutos_totales'] > (5/60)]
+            
+            # Procesar por centro
+            resultados = []
+            for centro_original in df_combined[col_centre].unique():
+                df_centro = df_combined[df_combined[col_centre] == centro_original]
+                centro = MAPEO_CENTROS.get(str(centro_original).upper(), centro_original)
+                
+                n_llamadas = len(df_centro)
+                n_internos = df_centro[col_nis].nunique()  # AQUÍ elimina duplicados correctamente
+                
+                minutos_enteros = 0
+                if col_duracio:
+                    minutos_totales = sum(df_centro[col_duracio].apply(parsear_duracion))
+                    minutos_enteros = math.ceil(minutos_totales)
+                
+                resultados.append({
+                    'Centro': centro,
+                    'N': n_llamadas,
+                    'Minuts': minutos_enteros,
+                    'Interns': n_internos
+                })
+            
+            # Crear DataFrame base
+            df_base = pd.DataFrame({
+                'Centro': ORDEN_CENTROS,
+                'N_Videotrucades': 0,
+                'Minuts_Videotrucades': 0,
+                'Interns_Videotrucades': 0
+            })
+            
+            df_resultados = pd.DataFrame(resultados)
+            
+            for idx, centro in enumerate(df_base['Centro']):
+                centro_buscar = centro
+                
+                if centro_buscar in df_resultados['Centro'].values:
+                    fila = df_resultados[df_resultados['Centro'] == centro_buscar].iloc[0]
+                    df_base.at[idx, 'N_Videotrucades'] = fila['N']
+                    df_base.at[idx, 'Minuts_Videotrucades'] = fila['Minuts'] if 'Minuts' in fila else 0
+                    df_base.at[idx, 'Interns_Videotrucades'] = fila['Interns']
+            
+            df_videotrucades_final = df_base
+    
+    # Procesar VIDEOVISITES unificando datos (mismo proceso)
     df_videovisites_final = None
-    
-    if todos_videotrucades:
-        df_videotrucades_final = todos_videotrucades[0].copy()
-        for df in todos_videotrucades[1:]:
-            for col in ['N_Videotrucades', 'Minuts_Videotrucades', 'Interns_Videotrucades']:
-                df_videotrucades_final[col] = df_videotrucades_final[col] + df[col]
-    
-    if todos_videovisites:
-        df_videovisites_final = todos_videovisites[0].copy()
-        for df in todos_videovisites[1:]:
-            for col in ['N_Videovisites', 'Minuts_Videovisites', 'Interns_Videovisites']:
-                df_videovisites_final[col] = df_videovisites_final[col] + df[col]
+    if dfs_videovisites_raw:
+        df_combined = pd.concat(dfs_videovisites_raw, ignore_index=True)
+        
+        col_centre = None
+        col_nis = None
+        col_duracio = None
+        
+        for col in df_combined.columns:
+            if 'CENTRE' in col.upper():
+                col_centre = col
+            if 'NIS' in col.upper() or 'EXPEDIENT' in col.upper():
+                col_nis = col
+            if 'DURAC' in col.upper():
+                col_duracio = col
+        
+        if col_centre and col_nis:
+            df_combined = df_combined.dropna(subset=[col_centre, col_nis])
+            
+            if col_duracio:
+                df_combined = df_combined[df_combined[col_duracio] != '-']
+                df_combined = df_combined[df_combined[col_duracio] != ' - ']
+                df_combined = df_combined[~df_combined[col_duracio].astype(str).str.strip().eq('-')]
+                df_combined['minutos_totales'] = df_combined[col_duracio].apply(parsear_duracion)
+                df_combined = df_combined[df_combined['minutos_totales'] > (5/60)]
+            
+            resultados = []
+            for centro_original in df_combined[col_centre].unique():
+                df_centro = df_combined[df_combined[col_centre] == centro_original]
+                centro = MAPEO_CENTROS.get(str(centro_original).upper(), centro_original)
+                
+                n_llamadas = len(df_centro)
+                n_internos = df_centro[col_nis].nunique()
+                
+                minutos_enteros = 0
+                if col_duracio:
+                    minutos_totales = sum(df_centro[col_duracio].apply(parsear_duracion))
+                    minutos_enteros = math.ceil(minutos_totales)
+                
+                resultados.append({
+                    'Centro': centro,
+                    'N': n_llamadas,
+                    'Minuts': minutos_enteros,
+                    'Interns': n_internos
+                })
+            
+            df_base = pd.DataFrame({
+                'Centro': ORDEN_CENTROS,
+                'N_Videovisites': 0,
+                'Minuts_Videovisites': 0,
+                'Interns_Videovisites': 0
+            })
+            
+            df_resultados = pd.DataFrame(resultados)
+            
+            for idx, centro in enumerate(df_base['Centro']):
+                centro_buscar = centro
+                
+                if centro_buscar in df_resultados['Centro'].values:
+                    fila = df_resultados[df_resultados['Centro'] == centro_buscar].iloc[0]
+                    df_base.at[idx, 'N_Videovisites'] = fila['N']
+                    df_base.at[idx, 'Minuts_Videovisites'] = fila['Minuts'] if 'Minuts' in fila else 0
+                    df_base.at[idx, 'Interns_Videovisites'] = fila['Interns']
+            
+            df_videovisites_final = df_base
     
     return df_videotrucades_final, df_videovisites_final
 
