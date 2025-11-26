@@ -242,7 +242,7 @@ def calcular_tabla_acumulada(df_actual, df_anterior):
                 
                 # Calcular incremento: ((actual_acum - anterior_acum) / actual_acum) * 100
                 if valor_actual_acum > 0:
-                    incremento = ((valor_actual_acum - valor_anterior_acum) / valor_actual_acum) * 100
+                    incremento = ((valor_actual_acum - valor_anterior_acum) / valor_anterior_acum) * 100
                     df_acumulada.at[idx, col_incre] = f"{incremento:.1f}%"
                 elif valor_anterior_acum > 0:
                     df_acumulada.at[idx, col_incre] = "-100.0%"
@@ -1353,8 +1353,14 @@ def main():
                 
                 if col_n in datos_viz.columns:
                     # Preparar datos para el top 10
-                    top_data = datos_viz[['Centro', col_n, col_interns]].copy()
-                    top_data = top_data.sort_values(col_n, ascending=False).head(10)
+                    # Verificar si la columna de internos existe
+                    if col_interns in datos_viz.columns:
+                        top_data = datos_viz[['Centro', col_n, col_interns]].copy()
+                    else:
+                        # Si no existe columna de internos, solo usar N
+                        top_data = datos_viz[['Centro', col_n]].copy()
+                        top_data[col_interns] = 0  # Añadir columna vacía
+                        top_data = top_data.sort_values(col_n, ascending=False).head(10)
                     
                     # Crear gráfico de barras doble
                     fig = make_subplots(
@@ -1420,8 +1426,9 @@ def main():
                     
                     if tipo_grafico == "Gràfic circular (Pie)":
                         # Agrupar por servicio
-                        df_pie = df_minutos.groupby('Servei')['Minuts'].sum().reset_index()
-                        fig = px.pie(df_pie, values='Minuts', names='Servei',
+                        if not df_minutos.empty and 'Servei' in df_minutos.columns:
+                            df_pie = df_minutos.groupby('Servei')['Minuts'].sum().reset_index()
+                            fig = px.pie(df_pie, values='Minuts', names='Servei',
                                    title="Distribució total de minuts per servei")
                     else:
                         fig = px.bar(df_minutos, x='Centro', y='Minuts', color='Servei',
@@ -1431,6 +1438,8 @@ def main():
                     
                     fig.update_layout(height=500)
                     st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("No hi ha dades de minuts per visualitzar")
             
             # 4. Análisis de eficiencia
             st.markdown("#### 4. Anàlisi d'eficiència (Serveis per intern)")
